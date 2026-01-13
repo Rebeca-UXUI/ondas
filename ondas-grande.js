@@ -32,34 +32,37 @@
 
     const cfg = {
       stroke: "#ff3b1a",
-      lineWidth: 1.4,
+      lineWidth: 1.3,
       stepPx: 2,
 
-      /* POSICIÓN / ESCALA */
-      centerY: 0.38,
+      /* layout */
+      centerY: 0.42,
       microOffsetPx: 18,
 
-      /* 👉 ONDAS MUY GRANDES */
-      cyclesAcross: 0.42,     // 🔥 MUCHO más zoom
-      ampBase: 0.22,          // 🔥 más altura
-      baseSpeed: 0.18,
+      /* ONDAS GRANDES */
+      cyclesAcross: 0.48,      // 🔥 grandes
+      ampBase: 0.22,           // 🔥 ocupan altura
 
-      breatheSpeed: 0.30,
+      /* MOVIMIENTO MUY LENTO */
+      baseSpeed: 0.085,        // 🔥 MUY lento
+      breatheSpeed: 0.18,
       breatheAmount: 0.22,
 
-      /* INTERACCIÓN */
-      hoverRadiusPx: 28,
-      pushStrength: 0.55,     // cuánto “empujas” la onda
-      pointerEase: 0.14,
+      /* HOVER ORGÁNICO */
+      hoverBoost: 0.10,        // energía añadida
+      hoverSigmaN: 0.14,       // 🔥 ancho / difuso
+      hoverThresholdPx: 26,
 
-      /* link feel */
-      cursorThresholdPx: 26
+      pointerEase: 0.12,
+      energyRise: 0.08,
+      energyFall: 0.06,
+      coupling: 0.12           // leve influencia entre líneas
     };
 
     const lines = [
-      { phase: 0.0, alpha: 0.95, mo: -1, ampMul: 1.0, speedMul: 1.0 },
-      { phase: 2.2, alpha: 0.80, mo:  0, ampMul: 0.9, speedMul: 0.85 },
-      { phase: 4.4, alpha: 0.70, mo:  1, ampMul: 1.1, speedMul: 0.70 }
+      { phase: 0.0, alpha: 0.95, mo: -1, ampMul: 1.05, speedMul: 1.00, e: 0 },
+      { phase: 2.4, alpha: 0.80, mo:  0, ampMul: 0.95, speedMul: 0.90, e: 0 },
+      { phase: 4.8, alpha: 0.70, mo:  1, ampMul: 1.10, speedMul: 0.80, e: 0 }
     ];
 
     /* ================= STATE ================= */
@@ -67,9 +70,9 @@
     let pxT = 0.5, px = 0.5;
     let pyT = 0.5, py = 0.5;
     let inside = false;
+    const t0 = performance.now();
 
     let w = 0, h = 0;
-    const t0 = performance.now();
 
     /* ================= RESPONSIVE ================= */
 
@@ -77,10 +80,15 @@
       const isMobile = width <= 480;
       const isTablet = width <= 767;
 
-      cfg.centerY       = isMobile ? 0.46 : isTablet ? 0.42 : 0.38;
+      cfg.centerY       = isMobile ? 0.48 : isTablet ? 0.45 : 0.42;
+      cfg.microOffsetPx = isMobile ? 12  : 16;
+
       cfg.ampBase       = isMobile ? 0.18 : isTablet ? 0.20 : 0.22;
-      cfg.cyclesAcross  = isMobile ? 0.50 : isTablet ? 0.46 : 0.42;
-      cfg.microOffsetPx = isMobile ? 12  : 18;
+      cfg.cyclesAcross  = isMobile ? 0.56 : isTablet ? 0.52 : 0.48;
+
+      cfg.hoverBoost    = isMobile ? 0.07 : 0.10;
+      cfg.hoverSigmaN   = isMobile ? 0.18 : 0.14;
+      cfg.hoverThresholdPx = isMobile ? 22 : 26;
     }
 
     function resize() {
@@ -96,8 +104,14 @@
 
     /* ================= MATH ================= */
 
-    function waveY(line, t, x) {
+    function gauss(x, mu, sigma) {
+      const d = x - mu;
+      return Math.exp(-(d * d) / (2 * sigma * sigma));
+    }
+
+    function waveY(line, t, xPx, includeHover) {
       const yBase = h * cfg.centerY + line.mo * cfg.microOffsetPx;
+
       const A0 = h * cfg.ampBase * line.ampMul;
       const breathe =
         1 + Math.sin(t * cfg.breatheSpeed + line.phase) * cfg.breatheAmount;
@@ -105,17 +119,21 @@
       const omega = (Math.PI * 2 * cfg.cyclesAcross) / w;
       const speed = cfg.baseSpeed * line.speedMul;
 
-      return yBase + Math.sin(x * omega + t * speed + line.phase) * (A0 * breathe);
+      const hoverA = includeHover ? (h * cfg.hoverBoost * line.e) : 0;
+      const xn = xPx / w;
+      const g = includeHover ? gauss(xn, px, cfg.hoverSigmaN) : 0;
+
+      return yBase + Math.sin(
+        xPx * omega +
+        t * speed +
+        line.phase
+      ) * ((A0 * breathe) + (hoverA * g));
     }
 
     /* ================= POINTER ================= */
 
     canvas.addEventListener("pointerenter", () => inside = true, { passive: true });
-    canvas.addEventListener("pointerleave", () => {
-      inside = false;
-      canvas.style.cursor = "default";
-    }, { passive: true });
-
+    canvas.addEventListener("pointerleave", () => inside = false, { passive: true });
     canvas.addEventListener("pointermove", (e) => {
       const r = canvas.getBoundingClientRect();
       pxT = (e.clientX - r.left) / r.width;
@@ -135,6 +153,7 @@
       const breathe =
         1 + Math.sin(t * cfg.breatheSpeed + line.phase) * cfg.breatheAmount;
 
+      const hoverA = h * cfg.hoverBoost * line.e;
       const speed = cfg.baseSpeed * line.speedMul;
 
       ctx.globalAlpha = line.alpha;
@@ -142,25 +161,13 @@
 
       for (let x = -40; x <= w + 40; x += cfg.stepPx) {
         const xn = x / w;
-        const dx = (px - xn) * w;
-        const dist = Math.abs(dx);
-
-        // 👉 empuje orgánico lateral
-        const push =
-          inside && dist < cfg.hoverRadiusPx
-            ? (1 - dist / cfg.hoverRadiusPx) * cfg.pushStrength
-            : 0;
-
-        const phaseShift = push * Math.sign(dx);
-
-        const y =
-          yBase +
-          Math.sin(
-            x * omega +
-            t * speed +
-            line.phase +
-            phaseShift
-          ) * (A0 * breathe);
+        const g = gauss(xn, px, cfg.hoverSigmaN);
+        const A = (A0 * breathe) + (hoverA * g);
+        const y = yBase + Math.sin(
+          x * omega +
+          t * speed +
+          line.phase
+        ) * A;
 
         if (x === -40) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
@@ -177,19 +184,36 @@
       px += (pxT - px) * cfg.pointerEase;
       py += (pyT - py) * cfg.pointerEase;
 
-      // cursor “link”
-      let nearLine = false;
+      // detectar línea más cercana
       const xPx = px * w;
       const yPtr = py * h;
 
+      let bestI = 0;
+      let bestD = Infinity;
       for (let i = 0; i < lines.length; i++) {
-        const yL = waveY(lines[i], t, xPx);
-        if (Math.abs(yPtr - yL) < cfg.cursorThresholdPx) {
-          nearLine = true;
-          break;
+        const yL = waveY(lines[i], t, xPx, false);
+        const d = Math.abs(yPtr - yL);
+        if (d < bestD) {
+          bestD = d;
+          bestI = i;
         }
       }
-      canvas.style.cursor = nearLine ? "pointer" : "default";
+
+      const hoverNear = inside && bestD < cfg.hoverThresholdPx;
+      const base = hoverNear ? 1 : 0;
+
+      const targets = [0, 0, 0];
+      targets[bestI] = base;
+      if (cfg.coupling && base) {
+        for (let i = 0; i < lines.length; i++) {
+          if (i !== bestI) targets[i] = base * cfg.coupling;
+        }
+      }
+
+      for (let i = 0; i < lines.length; i++) {
+        const rate = targets[i] > lines[i].e ? cfg.energyRise : cfg.energyFall;
+        lines[i].e += (targets[i] - lines[i].e) * rate;
+      }
 
       ctx.clearRect(0, 0, w, h);
       ctx.strokeStyle = cfg.stroke;
@@ -197,7 +221,6 @@
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
 
-      // orden visual
       drawLine(lines[1], t);
       drawLine(lines[0], t);
       drawLine(lines[2], t);
@@ -216,3 +239,4 @@
     boot();
   }
 })();
+
