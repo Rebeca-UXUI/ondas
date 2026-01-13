@@ -19,6 +19,7 @@
     canvas.style.height = "100%";
     canvas.style.display = "block";
     canvas.style.pointerEvents = "auto";
+    canvas.style.zIndex = "0"; // ✅ no tapar cursor
 
     if (getComputedStyle(wrapper).position === "static") wrapper.style.position = "relative";
     wrapper.style.overflow = "hidden";
@@ -30,39 +31,35 @@
       lineWidth: 1.25,
       stepPx: 2,
 
-      // base layout (se overridea en responsive)
-      centerY: 0.34,
+      // posicion (se ajusta en responsive)
+      centerY: 0.40,
       microOffsetPx: 12,
 
-      // “zoom” = menos ciclos a lo ancho (ondas más grandes / cercanas)
-      cyclesAcross: 1.05,     // 👈 baja = más zoom (0.85..1.2)
+      // ✅ MÁS ZOOM: baja = más grande
+      cyclesAcross: 0.78,
       baseSpeed: 0.22,
 
-      // amplitud base
-      ampBase: 0.16,
+      // movimiento base
+      ampBase: 0.13,
       breatheSpeed: 0.35,
-      breatheAmount: 0.28,
+      breatheAmount: 0.22,
 
-      // hover suave y local
-      hoverBoost: 0.08,
-      hoverSigmaN: 0.085,
+      // hover cerca de línea
+      hoverBoost: 0.07,
+      hoverSigmaN: 0.075,
       hoverThresholdPx: 18,
 
       pointerEase: 0.16,
       energyRise: 0.10,
       energyFall: 0.08,
+      coupling: 0.05,
 
-      // puntos
-      dotsPerLine: 2,         // 1–3
-      dotRadius: 3.0,         // base (px)
-      dotGlowRadius: 9.0,     // glow max (px)
-      dotHitPx: 26,           // distancia para activar brillo
-
-      // micro particles
-      particlesMax: 60,
-      particleLife: 0.55,     // segundos
-      particleSpeed: 34,      // px/s
-      particleSpawn: 10       // por “hit” (caps by particlesMax)
+      // partículas
+      particlesMax: 90,
+      particleLife: 0.50,
+      particleSpeed: 28,
+      particleSpawn: 6,
+      particleCooldown: 0.06 // segundos
     };
 
     const lines = [
@@ -71,59 +68,36 @@
       { phase: 4.2, alpha: 0.70, mo:  1, ampMul: 1.10, speedMul: 0.72, e: 0 }
     ];
 
-    // pointer
     let pxT = 0.5, px = 0.5;
     let pyT = 0.5, py = 0.5;
     let inside = false;
+    const t0 = performance.now();
 
-    // particles pool (reutilizable)
+    // pool partículas
     const particles = Array.from({ length: cfg.particlesMax }, () => ({
       alive: 0, x: 0, y: 0, vx: 0, vy: 0, age: 0
     }));
+    let particleCd = 0;
 
-    // dot anchors (se calculan en resize)
-    let dotAnchors = []; // [{lineIndex, xN}] xN in 0..1
-
-    const t0 = performance.now();
-
-    function applyResponsive(w, h) {
+    function applyResponsive(w) {
       const isMobile = w <= 480;
       const isTablet = w <= 767;
 
-      // ✅ evitar nav: nunca demasiado arriba
-      // Desktop un poco más arriba, mobile un poco más abajo por texto grande
-      cfg.centerY = isMobile ? 0.40 : isTablet ? 0.37 : 0.34;
+      // ✅ no llegar al nav
+      cfg.centerY = isMobile ? 0.46 : isTablet ? 0.43 : 0.40;
 
       cfg.microOffsetPx = isMobile ? 9 : isTablet ? 10 : 12;
 
-      // “Zoom” (ondas más grandes) sin subirlas
-      cfg.cyclesAcross = isMobile ? 0.98 : isTablet ? 1.02 : 1.05;
+      // ✅ zoom
+      cfg.cyclesAcross = isMobile ? 0.82 : isTablet ? 0.80 : 0.78;
 
-      // amplitud algo más grande, pero controlada
-      cfg.ampBase = isMobile ? 0.14 : isTablet ? 0.15 : 0.16;
-      cfg.breatheAmount = isMobile ? 0.22 : isTablet ? 0.25 : 0.28;
+      // amplitud base (controlada)
+      cfg.ampBase = isMobile ? 0.12 : 0.13;
 
-      // hover aún más discreto en mobile (para no ensuciar)
-      cfg.hoverBoost = isMobile ? 0.06 : isTablet ? 0.07 : 0.08;
-      cfg.hoverSigmaN = isMobile ? 0.075 : isTablet ? 0.08 : 0.085;
-      cfg.hoverThresholdPx = isMobile ? 16 : isTablet ? 17 : 18;
-
-      // dots
-      cfg.dotRadius = isMobile ? 2.8 : 3.0;
-      cfg.dotGlowRadius = isMobile ? 8.0 : 9.0;
-      cfg.dotHitPx = isMobile ? 24 : 26;
-    }
-
-    function rebuildDotAnchors() {
-      // dos puntos por línea, repartidos (puedes ajustar)
-      const xs = cfg.dotsPerLine === 1 ? [0.62]
-               : cfg.dotsPerLine === 2 ? [0.38, 0.72]
-               : [0.30, 0.56, 0.80];
-
-      dotAnchors = [];
-      for (let li = 0; li < 3; li++) {
-        for (const xN of xs) dotAnchors.push({ lineIndex: li, xN });
-      }
+      // hover suave
+      cfg.hoverBoost = isMobile ? 0.055 : 0.07;
+      cfg.hoverSigmaN = isMobile ? 0.07 : 0.075;
+      cfg.hoverThresholdPx = isMobile ? 16 : 18;
     }
 
     function resize() {
@@ -132,9 +106,7 @@
       canvas.width = Math.max(1, Math.floor(r.width * dpr));
       canvas.height = Math.max(1, Math.floor(r.height * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      applyResponsive(r.width, r.height);
-      rebuildDotAnchors();
+      applyResponsive(r.width);
     }
 
     function gauss(x, mu, sigma) {
@@ -144,11 +116,10 @@
 
     function waveY(line, t, w, h, xPx, includeHover) {
       const yBase = h * cfg.centerY + line.mo * cfg.microOffsetPx;
-
       const A0 = h * cfg.ampBase * line.ampMul;
       const breathe = 1 + Math.sin(t * cfg.breatheSpeed + line.phase) * cfg.breatheAmount;
 
-      const omega = (Math.PI * 2 * cfg.cyclesAcross) / w; // zoom control
+      const omega = (Math.PI * 2 * cfg.cyclesAcross) / w;
       const speed = cfg.baseSpeed * line.speedMul;
 
       const hoverA = includeHover ? (h * cfg.hoverBoost * line.e) : 0;
@@ -156,23 +127,23 @@
       const g = includeHover ? gauss(xn, px, cfg.hoverSigmaN) : 0;
 
       const A = (A0 * breathe) + (hoverA * g);
-
       return yBase + Math.sin(xPx * omega + t * speed + line.phase) * A;
     }
 
     function spawnParticles(x, y) {
-      // micro particles: pequeños puntos que salen y se desvanecen
+      if (particleCd > 0) return;
+      particleCd = cfg.particleCooldown;
+
       let spawned = 0;
       for (let i = 0; i < particles.length && spawned < cfg.particleSpawn; i++) {
         const p = particles[i];
         if (p.alive) continue;
 
         const a = Math.random() * Math.PI * 2;
-        const s = cfg.particleSpeed * (0.6 + Math.random() * 0.8);
+        const s = cfg.particleSpeed * (0.7 + Math.random() * 0.7);
 
         p.alive = 1;
-        p.x = x;
-        p.y = y;
+        p.x = x; p.y = y;
         p.vx = Math.cos(a) * s;
         p.vy = Math.sin(a) * s;
         p.age = 0;
@@ -218,73 +189,6 @@
       ctx.stroke();
     }
 
-    function drawDotsAndParticles(t, w, h, dt) {
-      // Dots: brillan al estar cerca (hit test por distancia)
-      for (const d of dotAnchors) {
-        const line = lines[d.lineIndex];
-        const x = d.xN * w;
-        const y = waveY(line, t, w, h, x, true);
-
-        const dx = (px * w) - x;
-        const dy = (py * h) - y;
-        const dist = Math.hypot(dx, dy);
-
-        const near = inside && dist < cfg.dotHitPx;
-
-        // brillo: 0..1
-        const glow = near ? 1 - (dist / cfg.dotHitPx) : 0;
-
-        if (near && glow > 0.75) {
-          // micro particles cuando estás MUY cerca
-          spawnParticles(x, y);
-        }
-
-        // dot base
-        ctx.save();
-        ctx.globalAlpha = 0.95;
-        ctx.fillStyle = cfg.stroke;
-
-        // glow (halo)
-        if (glow > 0) {
-          ctx.globalAlpha = 0.20 + glow * 0.35;
-          ctx.beginPath();
-          ctx.arc(x, y, cfg.dotGlowRadius * glow, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalAlpha = 0.95;
-        }
-
-        ctx.beginPath();
-        ctx.arc(x, y, cfg.dotRadius + glow * 1.4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-
-      // Particles update/draw
-      for (const p of particles) {
-        if (!p.alive) continue;
-
-        p.age += dt;
-        const life = cfg.particleLife;
-        if (p.age >= life) {
-          p.alive = 0;
-          continue;
-        }
-
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-
-        const a = 1 - (p.age / life);
-
-        ctx.save();
-        ctx.globalAlpha = 0.12 * a;
-        ctx.fillStyle = cfg.stroke;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 1.2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-    }
-
     let last = performance.now();
 
     function frame(now) {
@@ -295,13 +199,14 @@
       const dt = Math.min(0.033, (now - last) / 1000);
       last = now;
 
+      particleCd = Math.max(0, particleCd - dt);
+
       const t = (now - t0) / 1000;
 
-      // suaviza puntero
       px += (pxT - px) * cfg.pointerEase;
       py += (pyT - py) * cfg.pointerEase;
 
-      // HIT TEST por cercanía: solo reacciona la onda más cercana (a la curva)
+      // línea más cercana
       const xPx = px * w;
       const yPtr = py * h;
 
@@ -317,8 +222,6 @@
 
       const targets = [0, 0, 0];
       targets[bestI] = base;
-
-      // coupling mínimo (muy poco)
       if (cfg.coupling > 0 && base > 0) {
         for (let i = 0; i < 3; i++) if (i !== bestI) targets[i] = base * cfg.coupling;
       }
@@ -328,19 +231,41 @@
         lines[i].e += (targets[i] - lines[i].e) * rate;
       }
 
+      // spawn micro particles cerca de la línea activa
+      if (hoverNear) {
+        const yOn = waveY(lines[bestI], t, w, h, xPx, true);
+        spawnParticles(xPx, yOn);
+      }
+
       ctx.clearRect(0, 0, w, h);
       ctx.strokeStyle = cfg.stroke;
       ctx.lineWidth = cfg.lineWidth;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
 
-      // ondas
       drawLine(lines[1], t, w, h);
       drawLine(lines[0], t, w, h);
       drawLine(lines[2], t, w, h);
 
-      // dots + micro particles
-      drawDotsAndParticles(t, w, h, dt);
+      // draw particles
+      for (const p of particles) {
+        if (!p.alive) continue;
+
+        p.age += dt;
+        if (p.age >= cfg.particleLife) { p.alive = 0; continue; }
+
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+
+        const a = 1 - (p.age / cfg.particleLife);
+        ctx.save();
+        ctx.globalAlpha = 0.14 * a;
+        ctx.fillStyle = cfg.stroke;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 1.15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
 
       requestAnimationFrame(frame);
     }
@@ -356,3 +281,4 @@
     boot();
   }
 })();
+
