@@ -14,11 +14,11 @@
       wrapper.appendChild(canvas);
     }
 
-    // Evitar doble init (Webflow / recargas)
+    // Evitar doble init
     if (canvas.dataset.init === "1") return;
     canvas.dataset.init = "1";
 
-    // Estilos mínimos para que SIEMPRE se vea
+    // Estilos mínimos
     canvas.style.position = "absolute";
     canvas.style.inset = "0";
     canvas.style.width = "100%";
@@ -33,10 +33,10 @@
 
     const ctx = canvas.getContext("2d", { alpha: true });
 
-    // ===== CONFIGURACIÓN =====
+    // ===== CONFIGURACIÓN (SUAVE + HIT TEST) =====
     const cfg = {
       stroke: "#ff3b1a",
-      lineWidth: 1.3,
+      lineWidth: 1.25,
       stepPx: 2,
 
       centerY: 0.5,
@@ -45,17 +45,25 @@
       baseFreq: 0.85,
       baseSpeed: 0.22,
 
-      ampBase: 0.17,        // ondas MUY pronunciadas
+      // ✅ Menos movimiento base
+      ampBase: 0.12,
       breatheSpeed: 0.35,
-      breatheAmount: 0.55,
+      breatheAmount: 0.30,
 
-      hoverBoost: 0.30,     // efecto hover fuerte
-      hoverSigmaN: 0.12,
+      // ✅ Hover menos exagerado
+      hoverBoost: 0.10,
+      hoverSigmaN: 0.09,
 
+      // ✅ Suavidad
       pointerEase: 0.16,
       energyRise: 0.10,
-      energyFall: 0.06,
-      coupling: 0.30
+      energyFall: 0.07,
+
+      // ✅ casi sin contagio
+      coupling: 0.06,
+
+      // ✅ solo activa cerca de la línea (px)
+      hoverThresholdPx: 22
     };
 
     const lines = [
@@ -65,24 +73,34 @@
     ];
 
     // ===== ESTADO =====
-    let pxT = 0.5;
-    let px = 0.5;
+    let pxT = 0.5, px = 0.5;
+    let pyT = 0.5, py = 0.5;
     let inside = false;
     const t0 = performance.now();
 
-    // ===== RESIZE REAL (CRÍTICO) =====
+    // ===== RESIZE REAL =====
     function resize() {
       const r = canvas.getBoundingClientRect();
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width  = Math.max(1, Math.floor(r.width  * dpr));
+      canvas.width  = Math.max(1, Math.floor(r.width * dpr));
       canvas.height = Math.max(1, Math.floor(r.height * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
-    // ===== UTIL =====
+    // ===== UTILS =====
     function gauss(x, mu, sigma) {
       const d = x - mu;
       return Math.exp(-(d * d) / (2 * sigma * sigma));
+    }
+
+    // predice y(x) de una línea (sin hover) para hit-test
+    function predictLineY(line, t, w, h, xPx) {
+      const yBase = h * cfg.centerY + line.mo * cfg.microOffsetPx;
+      const A0 = h * cfg.ampBase * line.ampMul;
+      const breathe = 1 + Math.sin(t * cfg.breatheSpeed + line.phase) * cfg.breatheAmount;
+      const k = (Math.PI * 2 * cfg.baseFreq) / w;
+      const speed = cfg.baseSpeed * line.speedMul;
+      return yBase + Math.sin(xPx * k + t * speed + line.phase) * (A0 * breathe);
     }
 
     // ===== POINTER =====
@@ -91,7 +109,9 @@
     canvas.addEventListener("pointermove", (e) => {
       const r = canvas.getBoundingClientRect();
       pxT = (e.clientX - r.left) / r.width;
+      pyT = (e.clientY - r.top) / r.height;
       pxT = Math.max(0, Math.min(1, pxT));
+      pyT = Math.max(0, Math.min(1, pyT));
       inside = true;
     }, { passive: true });
 
@@ -100,9 +120,9 @@
       const yBase = h * cfg.centerY + line.mo * cfg.microOffsetPx;
 
       const A0 = h * cfg.ampBase * line.ampMul;
-      const breathe =
-        1 + Math.sin(t * cfg.breatheSpeed + line.phase) * cfg.breatheAmount;
+      const breathe = 1 + Math.sin(t * cfg.breatheSpeed + line.phase) * cfg.breatheAmount;
 
+      // hover local: solo si line.e > 0 (solo la cercana)
       const hoverA = h * cfg.hoverBoost * line.e;
 
       const k = (Math.PI * 2 * cfg.baseFreq) / w;
@@ -138,14 +158,34 @@
 
       // suavizado puntero
       px += (pxT - px) * cfg.pointerEase;
+      py += (pyT - py) * cfg.pointerEase;
 
-      // energía + coupling
-      const base = inside ? 1 : 0;
-      const targets = [
-        base,
-        base * (0.75 + cfg.coupling * 0.4),
-        base * (0.65 + cfg.coupling * 0.6)
-      ];
+      // ===== HIT TEST: línea más cercana a (px,py) =====
+      const xPx = px * w;
+      const yPtr = py * h;
+
+      let bestI = 0;
+      let bestD = Infinity;
+
+      for (let i = 0; i < 3; i++) {
+        const yL = predictLineY(lines[i], t, w, h, xPx);
+        const d = Math.abs(yPtr - yL);
+        if (d < bestD) { bestD = d; bestI = i; }
+      }
+
+      const hoverNear = inside && bestD < cfg.hoverThresholdPx;
+
+      // Solo activa la más cercana
+      const base = hoverNear ? 1 : 0;
+      const targets = [0, 0, 0];
+      targets[bestI] = base;
+
+      // (opcional) mini coupling: muy leve al resto
+      if (cfg.coupling > 0 && base > 0) {
+        for (let i = 0; i < 3; i++) {
+          if (i !== bestI) targets[i] = base * cfg.coupling;
+        }
+      }
 
       for (let i = 0; i < 3; i++) {
         const rate = targets[i] > lines[i].e ? cfg.energyRise : cfg.energyFall;
@@ -171,12 +211,12 @@
     requestAnimationFrame(frame);
   }
 
-  // ===== ARRANQUE SEGURO =====
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", boot, { once: true });
   } else {
     boot();
   }
 })();
+
 
 
