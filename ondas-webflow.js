@@ -1,115 +1,117 @@
 (() => {
-  const wrapper = document.querySelector(".wave_wrapper");
   const canvas = document.getElementById("waves");
-  if (!wrapper || !canvas) return;
+  if (!canvas) { console.error("[Waves] canvas #waves not found"); return; }
 
-  // evita doble init
   if (canvas.dataset.init === "1") return;
   canvas.dataset.init = "1";
 
   const ctx = canvas.getContext("2d", { alpha: true });
 
-  const S = {
-    color: "rgba(255,59,26,0.9)",
-    lines: 3,
-    points: 520,
-    baseFreq: [0.9, 0.82, 0.96],
-    baseAmp:  [10, 9, 9.5],     // px
-    phase:    [0, 1.7, 3.2],
-    speed:    [0.22, 0.18, 0.2],
-    breatheAmp: 0.22,
-    breatheSpeed: 0.25,
-    hoverBoost: 22,             // px extra
-    hoverSigma: 0.16,           // en 0..1
-    energyRise: 0.08,
-    energyFall: 0.05,
-    coupling: 0.25,
-    lineWidth: 1.2,
-    centerY: 0.52,
-    spacingPx: 10
+  const cfg = {
+    stroke: "#ff3b1a",
+    lineWidth: 1.25,
+    stepPx: 2,
+
+    centerY: 0.50,
+    microOffsetPx: 10,
+
+    baseFreq: 0.85,
+    baseSpeed: 0.22,
+
+    ampBase: 0.16,
+    breatheSpeed: 0.35,
+    breatheAmount: 0.55,
+
+    hoverBoost: 0.26,
+    hoverSigmaN: 0.12,
+    pointerEase: 0.16,
+    energyRise: 0.10,
+    energyFall: 0.06,
+    coupling: 0.30
   };
 
-  let w=0,h=0,dpr=1;
-  const energy = new Float32Array(3);
-  let pxT=0, px=0, inside=false;
+  const lines = [
+    { phase: 0.0, alpha: 0.95, mo: -1, ampMul: 1.05, speedMul: 1.00, e: 0 },
+    { phase: 2.1, alpha: 0.80, mo:  0, ampMul: 0.92, speedMul: 0.86, e: 0 },
+    { phase: 4.2, alpha: 0.70, mo:  1, ampMul: 1.10, speedMul: 0.72, e: 0 }
+  ];
 
-  function resize(){
-    const r = wrapper.getBoundingClientRect();
-    w = Math.max(1, Math.floor(r.width));
-    h = Math.max(1, Math.floor(r.height));
-    dpr = Math.min(2, window.devicePixelRatio || 1);
-    canvas.width  = Math.floor(w*dpr);
-    canvas.height = Math.floor(h*dpr);
-    canvas.style.width = w+"px";
-    canvas.style.height = h+"px";
-    ctx.setTransform(dpr,0,0,dpr,0,0);
-  }
-  resize();
-  window.addEventListener("resize", resize, {passive:true});
-  if ("ResizeObserver" in window){
-    new ResizeObserver(resize).observe(wrapper);
-  }
+  let pxT = 0.5, px = 0.5, inside = false;
+  let t0 = performance.now();
 
-  canvas.addEventListener("pointermove", (e)=>{
+  function resize() {
     const r = canvas.getBoundingClientRect();
-    const x = (e.clientX - r.left)/r.width; //0..1
-    pxT = Math.max(0, Math.min(1, x));
-    inside = true;
-  }, {passive:true});
-  canvas.addEventListener("pointerleave", ()=> inside=false, {passive:true});
-
-  function gauss(x, mu, sigma){
-    const d = (x-mu);
-    return Math.exp(-(d*d)/(2*sigma*sigma));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width  = Math.max(1, Math.floor(r.width  * dpr));
+    canvas.height = Math.max(1, Math.floor(r.height * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  const t0 = performance.now();
-  function frame(now){
-    const t = (now - t0)/1000;
-    px += (pxT - px)*0.15;
+  function gauss(x, m, s) {
+    const d = x - m;
+    return Math.exp(-(d * d) / (2 * s * s));
+  }
 
-    ctx.clearRect(0,0,w,h);
+  canvas.addEventListener("pointerenter", () => inside = true);
+  canvas.addEventListener("pointerleave", () => inside = false);
+  canvas.addEventListener("pointermove", e => {
+    const r = canvas.getBoundingClientRect();
+    pxT = (e.clientX - r.left) / r.width;
+    pxT = Math.max(0, Math.min(1, pxT));
+  });
 
-    const breathe = 1 + S.breatheAmp*Math.sin(t*S.breatheSpeed);
-    const y0 = h*S.centerY;
+  function draw(now) {
+    const r = canvas.getBoundingClientRect();
+    const w = r.width, h = r.height;
+    if (w < 2 || h < 2) return requestAnimationFrame(draw);
 
-    // targets + coupling
-    const baseE = inside ? 1 : 0;
-    const targets = [baseE, baseE*(0.75+S.coupling*0.5), baseE*(0.65+S.coupling)];
+    const t = (now - t0) / 1000;
+    px += (pxT - px) * cfg.pointerEase;
 
-    for (let k=0;k<3;k++){
-      const rate = targets[k] > energy[k] ? S.energyRise : S.energyFall;
-      energy[k] += (targets[k]-energy[k])*rate;
-    }
+    const target = inside ? 1 : 0;
+    const targets = [
+      target,
+      target * (0.75 + cfg.coupling * 0.4),
+      target * (0.65 + cfg.coupling * 0.6)
+    ];
 
-    ctx.lineWidth = S.lineWidth;
-    ctx.strokeStyle = S.color;
-    ctx.lineJoin = "round";
+    lines.forEach((l, i) => {
+      const rate = targets[i] > l.e ? cfg.energyRise : cfg.energyFall;
+      l.e += (targets[i] - l.e) * rate;
+    });
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = cfg.stroke;
+    ctx.lineWidth = cfg.lineWidth;
     ctx.lineCap = "round";
 
-    for (let k=0;k<3;k++){
-      const yOff = (k-1)*S.spacingPx;
+    lines.forEach(line => {
+      const yBase = h * cfg.centerY + line.mo * cfg.microOffsetPx;
+      const A0 = h * cfg.ampBase * line.ampMul;
+      const breathe = 1 + Math.sin(t * cfg.breatheSpeed + line.phase) * cfg.breatheAmount;
+      const hoverA = h * cfg.hoverBoost * line.e;
+      const k = (Math.PI * 2 * cfg.baseFreq) / w;
+      const speed = cfg.baseSpeed * line.speedMul;
 
+      ctx.globalAlpha = line.alpha;
       ctx.beginPath();
-      for (let i=0;i<S.points;i++){
-        const xn = i/(S.points-1);       // 0..1
-        const x = xn*w;
 
-        const g = gauss(xn, px, S.hoverSigma);
-        const amp = (S.baseAmp[k]*breathe) + (S.hoverBoost*energy[k]*g);
-
-        const main = Math.sin((xn*6.2831*S.baseFreq[k]) + t*S.speed[k] + S.phase[k]);
-        const sub  = 0.22*Math.sin((xn*6.2831*S.baseFreq[k]*1.9) + t*S.speed[k]*0.7 + S.phase[k]);
-
-        const y = y0 + yOff + (main+sub)*amp;
-
-        if (i===0) ctx.moveTo(x,y);
-        else ctx.lineTo(x,y);
+      for (let x = -30; x <= w + 30; x += cfg.stepPx) {
+        const xn = x / w;
+        const g = gauss(xn, px, cfg.hoverSigmaN);
+        const A = (A0 * breathe) + (hoverA * g);
+        const y = yBase + Math.sin(x * k + t * speed + line.phase) * A;
+        x === -30 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       }
-      ctx.stroke();
-    }
 
-    requestAnimationFrame(frame);
+      ctx.stroke();
+    });
+
+    requestAnimationFrame(draw);
   }
-  requestAnimationFrame(frame);
+
+  resize();
+  window.addEventListener("resize", resize);
+  requestAnimationFrame(draw);
 })();
+
