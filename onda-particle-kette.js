@@ -19,7 +19,7 @@
     canvas.style.height = "100%";
     canvas.style.display = "block";
     canvas.style.pointerEvents = "auto";
-    canvas.style.zIndex = "0"; // ✅ no tapar tu custom cursor
+    canvas.style.zIndex = "0"; // evita tapar cursor custom (cursor debe ir por encima)
 
     if (getComputedStyle(wrapper).position === "static") wrapper.style.position = "relative";
     wrapper.style.overflow = "hidden";
@@ -32,43 +32,56 @@
       lineWidth: 1.25,
       alpha: [0.95, 0.80, 0.70],
 
-      // layout (responsive)
-      centerY: 0.40,
+      // layout
+      centerY: 0.40,          // se ajusta responsive para no tocar nav
       microOffsetPx: 12,
 
-      // zoom (menos = más zoom)
-      cyclesAcross: 0.72, // ✅ más zoom
-      baseSpeed: 0.22,
+      // ===== ZOOM =====
+      // “Zoom” = menos ciclos a lo ancho. 50% más grande aprox.
+      // Si antes 0.72, ahora ~0.48–0.52. Ajustamos responsive.
+      cyclesAcross: 0.50,
 
-      // movimiento base (suave)
+      // motion base (suave)
+      baseSpeed: 0.22,
       ampBase: 0.13,
       breatheSpeed: 0.35,
       breatheAmount: 0.22,
 
-      // interacción: “tocar la línea”
-      touchThresholdPx: 18,   // distancia a la onda para activar
-      breakRadiusN: 0.06,     // radio local en x (0..1) donde “se rompe”
+      // “touch” (cerca de la onda)
+      touchThresholdPx: 18,
+      breakRadiusN: 0.065,     // zona local que “se abre”
+
+      // smoothing
       pointerEase: 0.16,
 
-      // partículas magnéticas
-      points: 520,            // puntos discretos (base del efecto)
-      particlesMax: 220,
-      spawnPerFrame: 10,      // partículas que saltan cuando “tocas”
-      particleLife: 0.65,     // seg
-      particleJitter: 14,     // px (impulso inicial)
-      springK: 38,            // fuerza imán (más = vuelve más rápido)
-      damping: 0.84,          // freno (0.80–0.90)
+      // ===== EXPLOSION + MAGNET =====
+      particlesMax: 320,
+      burstCount: 28,
+      burstCooldown: 0.16,
+      particleLife: 0.46,
+
+      // explosión (más alto = más fuerte hacia fuera)
+      particleJitter: 56,
+
+      // imán (más alto = vuelve más rápido)
+      springK: 95,
+      damping: 0.78,
+
+      // estética partículas
       particleSize: 1.15,
-      particleAlpha: 0.22,
+      particleSizeVar: 1.05,
+      particleAlpha: 0.30,
+      particleHalo: 6.0,
 
       // perf
+      points: 560,
       dprMax: 2
     };
 
     const lines = [
-      { phase: 0.0, mo: -1, ampMul: 1.05, speedMul: 1.00, e: 0 },
-      { phase: 2.1, mo:  0, ampMul: 0.92, speedMul: 0.86, e: 0 },
-      { phase: 4.2, mo:  1, ampMul: 1.10, speedMul: 0.72, e: 0 }
+      { phase: 0.0, mo: -1, ampMul: 1.05, speedMul: 1.00 },
+      { phase: 2.1, mo:  0, ampMul: 0.92, speedMul: 0.86 },
+      { phase: 4.2, mo:  1, ampMul: 1.10, speedMul: 0.72 }
     ];
 
     // pointer
@@ -76,7 +89,7 @@
     let pyT = 0.5, py = 0.5;
     let inside = false;
 
-    // precompute x normalized for points
+    // precompute x normalized for polyline
     const xN = new Float32Array(cfg.points);
     for (let i = 0; i < cfg.points; i++) xN[i] = i / (cfg.points - 1);
 
@@ -84,34 +97,41 @@
     const particles = Array.from({ length: cfg.particlesMax }, () => ({
       alive: 0,
       li: 0,
-      s: 0,      // 0..1 along x
+      s: 0,          // 0..1 along x
       x: 0, y: 0,
       vx: 0, vy: 0,
-      age: 0
+      age: 0,
+      size: 1.0
     }));
 
     let w = 0, h = 0, dpr = 1;
     const t0 = performance.now();
     let last = performance.now();
 
+    // burst cooldown
+    let burstCd = 0;
+
     function applyResponsive(width) {
       const isMobile = width <= 480;
       const isTablet = width <= 767;
 
-      // que no toque el nav
+      // ✅ no tocar nav: un poco más abajo en mobile
       cfg.centerY = isMobile ? 0.46 : isTablet ? 0.43 : 0.40;
+      cfg.microOffsetPx = isMobile ? 9 : isTablet ? 10 : 12;
 
-      // zoom (más grande)
-      cfg.cyclesAcross = isMobile ? 0.78 : isTablet ? 0.75 : 0.72;
+      // ✅ zoom 50% aprox (más grande)
+      cfg.cyclesAcross = isMobile ? 0.56 : isTablet ? 0.52 : 0.50;
 
-      // amplitud contenida (flow)
+      // amplitud base: contenida para que no rompa el texto
       cfg.ampBase = isMobile ? 0.12 : 0.13;
+      cfg.breatheAmount = isMobile ? 0.18 : 0.22;
 
-      // touch más exigente en mobile
       cfg.touchThresholdPx = isMobile ? 16 : 18;
+      cfg.breakRadiusN = isMobile ? 0.060 : 0.065;
 
-      // break algo más pequeño en mobile
-      cfg.breakRadiusN = isMobile ? 0.055 : 0.06;
+      // partículas en mobile un pelín menos (evita ruido)
+      cfg.burstCount = isMobile ? 22 : 28;
+      cfg.particleJitter = isMobile ? 48 : 56;
     }
 
     function resize() {
@@ -141,31 +161,36 @@
       return yBase + Math.sin(xPx * omega + t * speed + line.phase) * (A0 * breathe);
     }
 
-    function spawnBreakParticles(li, centerXN, t) {
-      // crea partículas alrededor de la zona rota: [centerXN - breakRadiusN, +]
+    function spawnExplosion(li, centerXN, t) {
+      if (burstCd > 0) return;
+      burstCd = cfg.burstCooldown;
+
       let spawned = 0;
 
-      for (let i = 0; i < particles.length && spawned < cfg.spawnPerFrame; i++) {
+      for (let i = 0; i < particles.length && spawned < cfg.burstCount; i++) {
         const p = particles[i];
         if (p.alive) continue;
 
-        // s en el radio de rotura
-        const s = Math.max(0, Math.min(1, centerXN + (Math.random() * 2 - 1) * cfg.breakRadiusN));
+        const s = Math.max(0, Math.min(1,
+          centerXN + (Math.random() * 2 - 1) * cfg.breakRadiusN
+        ));
+
         const x = s * w;
         const y = waveY(lines[li], t, x, true);
+
+        // 💥 explosión radial hacia fuera
+        const a = Math.random() * Math.PI * 2;
+        const j = cfg.particleJitter * (0.75 + Math.random() * 0.7);
 
         p.alive = 1;
         p.li = li;
         p.s = s;
         p.x = x;
         p.y = y;
-
-        // impulso inicial tipo “salto”
-        const a = Math.random() * Math.PI * 2;
-        const j = cfg.particleJitter * (0.6 + Math.random() * 0.9);
         p.vx = Math.cos(a) * j;
         p.vy = Math.sin(a) * j;
         p.age = 0;
+        p.size = cfg.particleSize + Math.random() * cfg.particleSizeVar;
 
         spawned++;
       }
@@ -184,7 +209,7 @@
           continue;
         }
 
-        // objetivo = posición de la onda en ese s (magnética, y el objetivo se mueve con la onda)
+        // objetivo magnético = onda en la misma s (y el objetivo se mueve)
         const tx = p.s * w;
         const ty = waveY(lines[p.li], t, tx, true);
 
@@ -197,7 +222,7 @@
         p.x += p.vx * dt;
         p.y += p.vy * dt;
 
-        // si ya está muy cerca y “vieja”, apágala antes (evita ruido)
+        // si ya está muy cerca, apágala antes (queda “limpio”)
         if (p.age > cfg.particleLife * 0.55) {
           const dx = tx - p.x, dy = ty - p.y;
           if ((dx * dx + dy * dy) < 1.2) p.alive = 0;
@@ -206,20 +231,30 @@
     }
 
     function drawParticles() {
-      ctx.save();
-      ctx.fillStyle = cfg.stroke;
-
+      // halo sutil + punto
       for (const p of particles) {
         if (!p.alive) continue;
+
         const a = 1 - (p.age / cfg.particleLife);
-        ctx.globalAlpha = cfg.particleAlpha * a;
 
+        // halo
+        ctx.save();
+        ctx.globalAlpha = (cfg.particleAlpha * 0.40) * a;
+        ctx.fillStyle = cfg.stroke;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, cfg.particleSize, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, cfg.particleHalo * (0.45 + 0.55 * a), 0, Math.PI * 2);
         ctx.fill();
-      }
+        ctx.restore();
 
-      ctx.restore();
+        // core
+        ctx.save();
+        ctx.globalAlpha = cfg.particleAlpha * a;
+        ctx.fillStyle = cfg.stroke;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * (0.85 + 0.15 * a), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
     }
 
     function drawLineWithBreak(li, t, breakCenterXN, breakOn) {
@@ -236,7 +271,7 @@
       let skipping = false;
 
       for (let i = 0; i < xN.length; i++) {
-        const s = xN[i];        // 0..1
+        const s = xN[i];
         const x = s * w;
         const y = waveY(line, t, x, true);
 
@@ -274,13 +309,14 @@
       const dt = Math.min(0.033, (now - last) / 1000);
       last = now;
 
+      burstCd = Math.max(0, burstCd - dt);
+
       const t = (now - t0) / 1000;
 
-      // smooth pointer
       px += (pxT - px) * cfg.pointerEase;
       py += (pyT - py) * cfg.pointerEase;
 
-      // detect “touch” = cerca de la línea más cercana
+      // detect “touch”: cerca de la onda más cercana
       const xPx = px * w;
       const yPtr = py * h;
 
@@ -293,7 +329,6 @@
 
       const touch = inside && bestD < cfg.touchThresholdPx;
 
-      // limpia
       ctx.clearRect(0, 0, w, h);
 
       ctx.strokeStyle = cfg.stroke;
@@ -301,18 +336,17 @@
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
 
-      // “rompe” solo la línea activa en un radio local
       const breakCenterXN = px;
 
-      // si tocas, spawnea partículas (y el hueco aparece)
-      if (touch) spawnBreakParticles(bestI, breakCenterXN, t);
+      // 💥 explota cuando “tocas”
+      if (touch) spawnExplosion(bestI, breakCenterXN, t);
 
-      // dibuja líneas (solo una se rompe)
+      // rompe solo la línea activa
       drawLineWithBreak(1, t, breakCenterXN, touch && bestI === 1);
       drawLineWithBreak(0, t, breakCenterXN, touch && bestI === 0);
       drawLineWithBreak(2, t, breakCenterXN, touch && bestI === 2);
 
-      // partículas magnéticas
+      // partículas: vuelven con imán
       updateParticles(dt, t);
       drawParticles();
 
@@ -330,3 +364,4 @@
     boot();
   }
 })();
+
