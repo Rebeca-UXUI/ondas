@@ -1,215 +1,115 @@
-/* ondas-webflow.js
-   Resonance waves — Three.js (sin dependencias extra)
-   Funciona en Webflow con canvas transparente y hover interactivo
-*/
-
-/* =========================
-   SETTINGS
-========================= */
-const SETTINGS = {
-  selector: ".wave_wrapper",
-  canvasId: "waves3d",
-
-  // Color y look
-  color: 0xff3b1a, // #FF3B1A
-  opacity: 1,
-
-  // Calidad
-  points: 480,
-  xSpan: 2.4,
-
-  yOffsets: [-0.08, 0, 0.08],
-  zOffsets: [-0.02, 0, 0.02],
-
-  baseFreq: [0.85, 0.78, 0.92],
-  baseAmp: [0.08, 0.07, 0.075],
-  phase: [0.0, 1.7, 3.2],
-  speed: [0.18, 0.14, 0.16],
-
-  breatheAmp: 0.25,
-  breatheSpeed: 0.22,
-
-  hoverAmpBoost: 0.65,
-  hoverRadiusN: 0.18,
-
-  energyRise: 0.08,
-  energyFall: 0.045,
-  coupling: 0.28,
-
-  pointerEase: 0.15,
-  pixelRatioMax: 2,
-  cameraPadding: 1.15,
-
-  threeWaitMs: 250,
-  threeMaxWaitMs: 8000
-};
-
-/* =========================
-   INIT
-========================= */
 (() => {
-  function waitForTHREE(cb) {
-    const t0 = performance.now();
-    (function poll() {
-      if (window.THREE) return cb();
-      if (performance.now() - t0 > SETTINGS.threeMaxWaitMs) {
-        console.warn("[ondas] THREE not found");
-        return;
-      }
-      setTimeout(poll, SETTINGS.threeWaitMs);
-    })();
+  const wrapper = document.querySelector(".wave_wrapper");
+  const canvas = document.getElementById("waves");
+  if (!wrapper || !canvas) return;
+
+  // evita doble init
+  if (canvas.dataset.init === "1") return;
+  canvas.dataset.init = "1";
+
+  const ctx = canvas.getContext("2d", { alpha: true });
+
+  const S = {
+    color: "rgba(255,59,26,0.9)",
+    lines: 3,
+    points: 520,
+    baseFreq: [0.9, 0.82, 0.96],
+    baseAmp:  [10, 9, 9.5],     // px
+    phase:    [0, 1.7, 3.2],
+    speed:    [0.22, 0.18, 0.2],
+    breatheAmp: 0.22,
+    breatheSpeed: 0.25,
+    hoverBoost: 22,             // px extra
+    hoverSigma: 0.16,           // en 0..1
+    energyRise: 0.08,
+    energyFall: 0.05,
+    coupling: 0.25,
+    lineWidth: 1.2,
+    centerY: 0.52,
+    spacingPx: 10
+  };
+
+  let w=0,h=0,dpr=1;
+  const energy = new Float32Array(3);
+  let pxT=0, px=0, inside=false;
+
+  function resize(){
+    const r = wrapper.getBoundingClientRect();
+    w = Math.max(1, Math.floor(r.width));
+    h = Math.max(1, Math.floor(r.height));
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width  = Math.floor(w*dpr);
+    canvas.height = Math.floor(h*dpr);
+    canvas.style.width = w+"px";
+    canvas.style.height = h+"px";
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  resize();
+  window.addEventListener("resize", resize, {passive:true});
+  if ("ResizeObserver" in window){
+    new ResizeObserver(resize).observe(wrapper);
   }
 
-  function init() {
-    const wrapper = document.querySelector(SETTINGS.selector);
-    if (!wrapper) return;
+  canvas.addEventListener("pointermove", (e)=>{
+    const r = canvas.getBoundingClientRect();
+    const x = (e.clientX - r.left)/r.width; //0..1
+    pxT = Math.max(0, Math.min(1, x));
+    inside = true;
+  }, {passive:true});
+  canvas.addEventListener("pointerleave", ()=> inside=false, {passive:true});
 
-    let canvas = wrapper.querySelector(`#${SETTINGS.canvasId}`);
-    if (!canvas) {
-      canvas = document.createElement("canvas");
-      canvas.id = SETTINGS.canvasId;
-      wrapper.appendChild(canvas);
-    }
-
-    if (canvas.dataset.init === "1") return;
-    canvas.dataset.init = "1";
-
-    const THREE = window.THREE;
-
-    const renderer = new THREE.WebGLRenderer({
-      canvas,
-      alpha: true,
-      antialias: true
-    });
-
-    renderer.setClearColor(0x000000, 0);
-    renderer.setPixelRatio(Math.min(SETTINGS.pixelRatioMax, window.devicePixelRatio));
-
-    const scene = new THREE.Scene();
-
-    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -10, 10);
-    camera.position.z = 2;
-
-    const N = SETTINGS.points;
-    const xSpan = SETTINGS.xSpan;
-    const xMin = -xSpan / 2;
-    const xMax = xSpan / 2;
-
-    const xPositions = new Float32Array(N);
-    for (let i = 0; i < N; i++) {
-      xPositions[i] = xMin + (xMax - xMin) * (i / (N - 1));
-    }
-
-    const waves = [];
-    const energy = new Float32Array(3);
-    let pointerX = 0;
-    let pointerTarget = 0;
-    let pointerInside = false;
-
-    for (let k = 0; k < 3; k++) {
-      const geometry = new THREE.BufferGeometry();
-      const positions = new Float32Array(N * 3);
-
-      for (let i = 0; i < N; i++) {
-        positions[i * 3] = xPositions[i];
-        positions[i * 3 + 1] = SETTINGS.yOffsets[k];
-        positions[i * 3 + 2] = SETTINGS.zOffsets[k];
-      }
-
-      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-
-      const material = new THREE.LineBasicMaterial({
-        color: SETTINGS.color,
-        transparent: true,
-        opacity: SETTINGS.opacity
-      });
-
-      const line = new THREE.Line(geometry, material);
-      scene.add(line);
-
-      waves.push({ geometry, positions, k });
-    }
-
-    function resize() {
-      const r = wrapper.getBoundingClientRect();
-      const w = Math.max(1, Math.floor(r.width));
-      const h = Math.max(1, Math.floor(r.height));
-
-      // 🔴 CRÍTICO
-      canvas.width = w;
-      canvas.height = h;
-
-      renderer.setSize(w, h, false);
-
-      const aspect = w / h;
-      const halfW = (xSpan / 2) * SETTINGS.cameraPadding;
-      const halfH = halfW / aspect;
-
-      camera.left = -halfW;
-      camera.right = halfW;
-      camera.top = halfH;
-      camera.bottom = -halfH;
-      camera.updateProjectionMatrix();
-    }
-
-    window.addEventListener("resize", resize);
-    resize();
-
-    canvas.addEventListener("pointermove", e => {
-      const rect = canvas.getBoundingClientRect();
-      pointerTarget = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      pointerInside = true;
-    });
-
-    canvas.addEventListener("pointerleave", () => {
-      pointerInside = false;
-    });
-
-    const start = performance.now();
-
-    function animate(now) {
-      const t = (now - start) / 1000;
-      pointerX += (pointerTarget - pointerX) * SETTINGS.pointerEase;
-
-      const breathe = 1 + SETTINGS.breatheAmp * Math.sin(t * SETTINGS.breatheSpeed);
-
-      for (let w = 0; w < waves.length; w++) {
-        const wave = waves[w];
-        const ampBase = SETTINGS.baseAmp[w] * breathe;
-        const freq = SETTINGS.baseFreq[w];
-        const spd = SETTINGS.speed[w];
-        const ph = SETTINGS.phase[w];
-
-        const targetE = pointerInside ? 1 : 0;
-        energy[w] += (targetE - energy[w]) * (targetE ? SETTINGS.energyRise : SETTINGS.energyFall);
-
-        for (let i = 0; i < N; i++) {
-          const x = xPositions[i];
-          const xn = x / (xSpan / 2);
-          const dx = xn - pointerX;
-          const g = Math.exp(-(dx * dx) / (2 * SETTINGS.hoverRadiusN * SETTINGS.hoverRadiusN));
-
-          const y =
-            SETTINGS.yOffsets[w] +
-            Math.sin(x * freq + t * spd + ph) *
-              (ampBase + SETTINGS.hoverAmpBoost * energy[w] * g);
-
-          wave.positions[i * 3 + 1] = y;
-        }
-
-        wave.geometry.attributes.position.needsUpdate = true;
-      }
-
-      renderer.render(scene, camera);
-      requestAnimationFrame(animate);
-    }
-
-    requestAnimationFrame(animate);
+  function gauss(x, mu, sigma){
+    const d = (x-mu);
+    return Math.exp(-(d*d)/(2*sigma*sigma));
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => waitForTHREE(init));
-  } else {
-    waitForTHREE(init);
+  const t0 = performance.now();
+  function frame(now){
+    const t = (now - t0)/1000;
+    px += (pxT - px)*0.15;
+
+    ctx.clearRect(0,0,w,h);
+
+    const breathe = 1 + S.breatheAmp*Math.sin(t*S.breatheSpeed);
+    const y0 = h*S.centerY;
+
+    // targets + coupling
+    const baseE = inside ? 1 : 0;
+    const targets = [baseE, baseE*(0.75+S.coupling*0.5), baseE*(0.65+S.coupling)];
+
+    for (let k=0;k<3;k++){
+      const rate = targets[k] > energy[k] ? S.energyRise : S.energyFall;
+      energy[k] += (targets[k]-energy[k])*rate;
+    }
+
+    ctx.lineWidth = S.lineWidth;
+    ctx.strokeStyle = S.color;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+
+    for (let k=0;k<3;k++){
+      const yOff = (k-1)*S.spacingPx;
+
+      ctx.beginPath();
+      for (let i=0;i<S.points;i++){
+        const xn = i/(S.points-1);       // 0..1
+        const x = xn*w;
+
+        const g = gauss(xn, px, S.hoverSigma);
+        const amp = (S.baseAmp[k]*breathe) + (S.hoverBoost*energy[k]*g);
+
+        const main = Math.sin((xn*6.2831*S.baseFreq[k]) + t*S.speed[k] + S.phase[k]);
+        const sub  = 0.22*Math.sin((xn*6.2831*S.baseFreq[k]*1.9) + t*S.speed[k]*0.7 + S.phase[k]);
+
+        const y = y0 + yOff + (main+sub)*amp;
+
+        if (i===0) ctx.moveTo(x,y);
+        else ctx.lineTo(x,y);
+      }
+      ctx.stroke();
+    }
+
+    requestAnimationFrame(frame);
   }
+  requestAnimationFrame(frame);
 })();
