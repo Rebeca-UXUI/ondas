@@ -1,4 +1,36 @@
 (() => {
+  function boot() {
+    const wrapper = document.querySelector(".wave_wrapper");
+    if (!wrapper) {
+      console.error("[ondas] .wave_wrapper not found");
+      return;
+    }
+
+    let canvas = wrapper.querySelector("#waves");
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      canvas.id = "waves";
+      wrapper.appendChild(canvas);
+    }
+
+    if (canvas.dataset.init === "1") return;
+    canvas.dataset.init = "1";
+
+    // estilos mínimos
+    canvas.style.position = "absolute";
+    canvas.style.inset = "0";
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.style.display = "block";
+    canvas.style.pointerEvents = "auto";
+
+    if (getComputedStyle(wrapper).position === "static") {
+      wrapper.style.position = "relative";
+    }
+    wrapper.style.overflow = "hidden";
+
+    const ctx = canvas.getContext("2d", { alpha: true });
+    
   const canvas = document.getElementById("waves");
   if (!canvas) { console.error("[Waves] canvas #waves not found"); return; }
 
