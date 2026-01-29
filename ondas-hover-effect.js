@@ -41,7 +41,7 @@
       microOffsetPx: 18,
 
       /* ONDAS GRANDES */
-      cyclesAcross: 0.95,      // 🔥 grandes
+      cyclesAcross: 2,      // 🔥 grandes
       ampBase: 0.28,           // 🔥 ocupan altura
 
       /* MOVIMIENTO MUY LENTO */
