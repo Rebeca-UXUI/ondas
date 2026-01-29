@@ -19,6 +19,7 @@
     canvas.style.height = "100%";
     canvas.style.display = "block";
     canvas.style.pointerEvents = "none";
+    canvas.style.zIndex = "2";
     
 
     if (getComputedStyle(wrapper).position === "static") {
