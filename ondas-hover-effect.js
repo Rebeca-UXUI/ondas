@@ -84,8 +84,9 @@
       cfg.centerY       = isMobile ? 0.48 : isTablet ? 0.45 : 0.42;
       cfg.microOffsetPx = isMobile ? 12  : 16;
 
-      cfg.ampBase       = isMobile ? 0.18 : isTablet ? 0.20 : 0.22;
-      cfg.cyclesAcross  = isMobile ? 0.56 : isTablet ? 0.52 : 0.48;
+      cfg.ampBase      = isMobile ? 0.22 : isTablet ? 0.25 : 0.28;
+      cfg.cyclesAcross = isMobile ? 1.2  : isTablet ? 1.6  : 2.0;
+
 
       cfg.hoverBoost    = isMobile ? 0.07 : 0.10;
       cfg.hoverSigmaN   = isMobile ? 0.18 : 0.14;
