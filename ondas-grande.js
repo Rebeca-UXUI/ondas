@@ -133,33 +133,21 @@
 
     /* ================= POINTER ================= */
 
-   /* ================= POINTER (robusto) ================= */
+ /* ================= POINTER (HIT AREA) ================= */
 
-function updatePointer(clientX, clientY) {
-  const r = wrapper.getBoundingClientRect();
-  const x = clientX - r.left;
-  const y = clientY - r.top;
+const hit = wrapper.querySelector(".wave-hit-area") || wrapper;
 
-  // Solo activar interacción si el puntero está dentro del área de las ondas
-  inside = x >= 0 && x <= r.width && y >= 0 && y <= r.height;
-  if (!inside) return;
-
-  pxT = x / r.width;
-  pyT = y / r.height;
-
+hit.addEventListener("pointerenter", () => inside = true, { passive: true });
+hit.addEventListener("pointerleave", () => inside = false, { passive: true });
+hit.addEventListener("pointermove", (e) => {
+  const r = hit.getBoundingClientRect();
+  pxT = (e.clientX - r.left) / r.width;
+  pyT = (e.clientY - r.top) / r.height;
   pxT = Math.max(0, Math.min(1, pxT));
   pyT = Math.max(0, Math.min(1, pyT));
-}
-
-// mouse (desktop)
-window.addEventListener("mousemove", (e) => {
-  updatePointer(e.clientX, e.clientY);
+  inside = true;
 }, { passive: true });
 
-// pointer (pen / algunos navegadores)
-window.addEventListener("pointermove", (e) => {
-  updatePointer(e.clientX, e.clientY);
-}, { passive: true });
 
 
     /* ================= DRAW ================= */
