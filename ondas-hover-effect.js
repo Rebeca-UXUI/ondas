@@ -19,8 +19,6 @@
     canvas.style.height = "100%";
     canvas.style.display = "block";
     canvas.style.pointerEvents = "auto";
-   
-    
 
     if (getComputedStyle(wrapper).position === "static") {
       wrapper.style.position = "relative";
@@ -37,27 +35,27 @@
       stepPx: 2,
 
       /* layout */
-      centerY: 0.42,
+      centerY: 0.52,          // ✅ más centrado (antes 0.42)
       microOffsetPx: 18,
 
       /* ONDAS GRANDES */
-      cyclesAcross: 2,      // 🔥 grandes
-      ampBase: 0.28,           // 🔥 ocupan altura
+      cyclesAcross: 0.78,     // ✅ más ondulado, pero no exagerado (antes 2)
+      ampBase: 0.24,          // ✅ un poco más de amplitud (antes 0.28)
 
       /* MOVIMIENTO MUY LENTO */
-      baseSpeed: 0.085,        // 🔥 MUY lento
+      baseSpeed: 0.085,
       breatheSpeed: 0.18,
       breatheAmount: 0.22,
 
       /* HOVER ORGÁNICO */
-      hoverBoost: 0.10,        // energía añadida
-      hoverSigmaN: 0.14,       // 🔥 ancho / difuso
+      hoverBoost: 0.10,
+      hoverSigmaN: 0.14,
       hoverThresholdPx: 26,
 
       pointerEase: 0.12,
       energyRise: 0.08,
       energyFall: 0.06,
-      coupling: 0.12           // leve influencia entre líneas
+      coupling: 0.12
     };
 
     const lines = [
@@ -81,15 +79,19 @@
       const isMobile = width <= 480;
       const isTablet = width <= 767;
 
-      cfg.centerY       = isMobile ? 0.48 : isTablet ? 0.45 : 0.42;
-      cfg.microOffsetPx = isMobile ? 12  : 16;
+      // ✅ más centrado en todos los breakpoints
+      cfg.centerY = isMobile ? 0.58 : isTablet ? 0.55 : 0.52;
 
-      cfg.ampBase      = isMobile ? 0.22 : isTablet ? 0.25 : 0.28;
-      cfg.cyclesAcross = isMobile ? 1.2  : isTablet ? 1.6  : 2.0;
+      cfg.microOffsetPx = isMobile ? 12 : 16;
 
+      // ✅ más ondulado, pero controlado (no "2")
+      cfg.cyclesAcross = isMobile ? 0.95 : isTablet ? 0.88 : 0.78;
 
-      cfg.hoverBoost    = isMobile ? 0.07 : 0.10;
-      cfg.hoverSigmaN   = isMobile ? 0.18 : 0.14;
+      // ✅ un poco más de amplitud que antes (sin pasarse)
+      cfg.ampBase = isMobile ? 0.20 : isTablet ? 0.22 : 0.24;
+
+      cfg.hoverBoost = isMobile ? 0.07 : 0.10;
+      cfg.hoverSigmaN = isMobile ? 0.18 : 0.14;
       cfg.hoverThresholdPx = isMobile ? 22 : 26;
     }
 
@@ -132,24 +134,20 @@
       ) * ((A0 * breathe) + (hoverA * g));
     }
 
-    /* ================= POINTER ================= */
+    /* ================= POINTER (HIT AREA) ================= */
 
- /* ================= POINTER (HIT AREA) ================= */
+    const hit = wrapper.querySelector(".wave-hit-area") || wrapper;
 
-const hit = wrapper.querySelector(".wave-hit-area") || wrapper;
-
-hit.addEventListener("pointerenter", () => inside = true, { passive: true });
-hit.addEventListener("pointerleave", () => inside = false, { passive: true });
-hit.addEventListener("pointermove", (e) => {
-  const r = hit.getBoundingClientRect();
-  pxT = (e.clientX - r.left) / r.width;
-  pyT = (e.clientY - r.top) / r.height;
-  pxT = Math.max(0, Math.min(1, pxT));
-  pyT = Math.max(0, Math.min(1, pyT));
-  inside = true;
-}, { passive: true });
-
-
+    hit.addEventListener("pointerenter", () => inside = true, { passive: true });
+    hit.addEventListener("pointerleave", () => inside = false, { passive: true });
+    hit.addEventListener("pointermove", (e) => {
+      const r = hit.getBoundingClientRect();
+      pxT = (e.clientX - r.left) / r.width;
+      pyT = (e.clientY - r.top) / r.height;
+      pxT = Math.max(0, Math.min(1, pxT));
+      pyT = Math.max(0, Math.min(1, pyT));
+      inside = true;
+    }, { passive: true });
 
     /* ================= DRAW ================= */
 
@@ -192,7 +190,6 @@ hit.addEventListener("pointermove", (e) => {
       px += (pxT - px) * cfg.pointerEase;
       py += (pyT - py) * cfg.pointerEase;
 
-      // detectar línea más cercana
       const xPx = px * w;
       const yPtr = py * h;
 
@@ -247,3 +244,4 @@ hit.addEventListener("pointermove", (e) => {
     boot();
   }
 })();
+
